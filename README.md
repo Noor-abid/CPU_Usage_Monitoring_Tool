@@ -28,7 +28,7 @@ Real-time CPU & memory monitoring with live graphs, process table, alerts, and l
 
 ### Step 1 — Install Python
 Go to https://python.org/downloads and install Python 3.9 or newer.
-On Windows: ✅ check "Add Python to PATH" during install.
+On Windows: check "Add Python to PATH" during install.
 
 ### Step 2 — Create project folder
 Create a folder called `cpu_monitor` anywhere (e.g. your Desktop).

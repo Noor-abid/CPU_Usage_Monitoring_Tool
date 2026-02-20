@@ -8,6 +8,7 @@ Requirements: pip install psutil matplotlib
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+import tkinter.font as tkfont
 import threading
 import time
 import datetime
@@ -53,6 +54,29 @@ FONT_LABEL  = ("Courier New", 8)
 FONT_ALERT  = ("Courier New", 10, "bold")
 
 
+def _resolve_mono_font_family(root: tk.Tk) -> str:
+    """Pick a good cross-platform monospace font with fallbacks."""
+    preferred = [
+        "Cascadia Mono",      # modern Windows
+        "Consolas",           # classic Windows
+        "Menlo",              # macOS
+        "Monaco",             # macOS fallback
+        "DejaVu Sans Mono",   # Linux common
+        "Liberation Mono",    # Linux common
+        "Courier New",
+        "Courier",
+    ]
+    try:
+        available = {name.lower(): name for name in tkfont.families(root)}
+        for font_name in preferred:
+            resolved = available.get(font_name.lower())
+            if resolved:
+                return resolved
+    except Exception:
+        pass
+    return "TkFixedFont"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 class CPUMonitorApp:
     def __init__(self, root: tk.Tk):
@@ -61,6 +85,16 @@ class CPUMonitorApp:
         self.root.configure(bg=BG_DARK)
         self.root.geometry("1200x820")
         self.root.minsize(1000, 700)
+
+        # Resolve font family at runtime so it works across Windows/Linux/macOS.
+        mono_family = _resolve_mono_font_family(self.root)
+        global FONT_TITLE, FONT_HEAD, FONT_MONO, FONT_STATS, FONT_LABEL, FONT_ALERT
+        FONT_TITLE = (mono_family, 18, "bold")
+        FONT_HEAD = (mono_family, 9, "bold")
+        FONT_MONO = (mono_family, 9)
+        FONT_STATS = (mono_family, 13, "bold")
+        FONT_LABEL = (mono_family, 8)
+        FONT_ALERT = (mono_family, 10, "bold")
 
         # ── State ──────────────────────────────────────────────────────────
         self.sort_by      = tk.StringVar(value="cpu")
@@ -341,7 +375,7 @@ class CPUMonitorApp:
             mem       = psutil.virtual_memory()
             swap      = psutil.swap_memory()
             n_procs   = len(psutil.pids())
-            load      = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+            load      = os.getloadavg() if hasattr(os, "getloadavg") else (None, None, None)
 
             # Update stat boxes
             self._stat_boxes["cpu_total"].config(text=f"{cpu_pct:.1f}%")
@@ -355,8 +389,11 @@ class CPUMonitorApp:
             self._stat_boxes["swap"].config(
                 text=f"{swap.percent:.1f}%  ({swap.used//1024//1024}MB)")
             self._stat_boxes["proc_count"].config(text=str(n_procs))
-            self._stat_boxes["load_avg"].config(
-                text=f"{load[0]:.2f}  {load[1]:.2f}  {load[2]:.2f}")
+            if all(value is not None for value in load):
+                self._stat_boxes["load_avg"].config(
+                    text=f"{load[0]:.2f}  {load[1]:.2f}  {load[2]:.2f}")
+            else:
+                self._stat_boxes["load_avg"].config(text="N/A")
 
             # CPU bar
             self._draw_cpu_bar(cpu_pct)
@@ -365,7 +402,7 @@ class CPUMonitorApp:
             # History
             self.cpu_history.append(cpu_pct)
             self.mem_history.append(mem.percent)
-            self.load_history.append(load[0] * 10)
+            self.load_history.append((load[0] or 0) * 10)
             self.time_labels.append(datetime.datetime.now().strftime("%H:%M:%S"))
             self._per_cores = per_cores
 
@@ -417,10 +454,11 @@ class CPUMonitorApp:
                      "memory_info", "status", "num_threads", "username"]):
                 try:
                     info = p.info
-                    if filter_val and filter_val not in info["name"].lower():
+                    name = (info.get("name") or "")
+                    if filter_val and filter_val not in name.lower():
                         continue
                     procs.append(info)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
 
             # Sort
