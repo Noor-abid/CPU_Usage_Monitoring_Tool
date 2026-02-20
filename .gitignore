@@ -1,3 +1,5 @@
 .venv/
+__pycache__/
+*.pyc
 cpu_log.csv
 

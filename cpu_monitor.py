@@ -8,13 +8,11 @@ Requirements: pip install psutil matplotlib
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-import tkinter.font as tkfont
 import threading
 import time
 import datetime
 import os
 import csv
-import psutil
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
@@ -22,59 +20,35 @@ import matplotlib.animation as animation
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from collections import deque
+from app_config import (
+    ACCENT,
+    ACCENT2,
+    ACCENT3,
+    ALERT_THRESHOLD,
+    BG_DARK,
+    BG_PANEL,
+    BG_ROW_ALT,
+    BORDER,
+    GRAPH_BG,
+    GRAPH_HISTORY,
+    GRAPH_INTERVAL_MS,
+    LOG_FILE,
+    MAX_PROCESSES,
+    REFRESH_INTERVAL,
+    TEXT_DIM,
+    TEXT_HEAD,
+    TEXT_MAIN,
+    WARN_COLOR,
+    build_fonts,
+)
+from system_metrics import get_process_rows, get_system_snapshot
 
-# ─── Configuration ─────────────────────────────────────────────────────────────
-REFRESH_INTERVAL   = 1000        # ms — how often the process table refreshes
-GRAPH_HISTORY      = 60          # seconds of history shown in line graph
-ALERT_THRESHOLD    = 80.0        # % CPU — triggers a warning alert
-LOG_FILE           = "cpu_log.csv"
-MAX_PROCESSES      = 30          # max rows in table
-GRAPH_INTERVAL_MS  = 1000        # graph refresh in ms
-
-# ─── Color Palette (dark industrial theme) ────────────────────────────────────
-BG_DARK    = "#0d0f14"
-BG_PANEL   = "#13161e"
-BG_ROW_ALT = "#1a1d27"
-ACCENT     = "#00e5ff"
-ACCENT2    = "#ff4757"
-ACCENT3    = "#2ed573"
-TEXT_MAIN  = "#e8eaf0"
-TEXT_DIM   = "#5a6070"
-TEXT_HEAD  = "#00e5ff"
-BORDER     = "#1e2230"
-WARN_COLOR = "#ff6b35"
-GRAPH_BG   = "#0a0c10"
-
-# ─── Fonts ─────────────────────────────────────────────────────────────────────
-FONT_TITLE  = ("Courier New", 18, "bold")
-FONT_HEAD   = ("Courier New", 9, "bold")
-FONT_MONO   = ("Courier New", 9)
-FONT_STATS  = ("Courier New", 13, "bold")
-FONT_LABEL  = ("Courier New", 8)
-FONT_ALERT  = ("Courier New", 10, "bold")
-
-
-def _resolve_mono_font_family(root: tk.Tk) -> str:
-    """Pick a good cross-platform monospace font with fallbacks."""
-    preferred = [
-        "Cascadia Mono",      # modern Windows
-        "Consolas",           # classic Windows
-        "Menlo",              # macOS
-        "Monaco",             # macOS fallback
-        "DejaVu Sans Mono",   # Linux common
-        "Liberation Mono",    # Linux common
-        "Courier New",
-        "Courier",
-    ]
-    try:
-        available = {name.lower(): name for name in tkfont.families(root)}
-        for font_name in preferred:
-            resolved = available.get(font_name.lower())
-            if resolved:
-                return resolved
-    except Exception:
-        pass
-    return "TkFixedFont"
+FONT_TITLE = ("Courier New", 18, "bold")
+FONT_HEAD = ("Courier New", 9, "bold")
+FONT_MONO = ("Courier New", 9)
+FONT_STATS = ("Courier New", 13, "bold")
+FONT_LABEL = ("Courier New", 8)
+FONT_ALERT = ("Courier New", 10, "bold")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -87,14 +61,14 @@ class CPUMonitorApp:
         self.root.minsize(1000, 700)
 
         # Resolve font family at runtime so it works across Windows/Linux/macOS.
-        mono_family = _resolve_mono_font_family(self.root)
+        fonts = build_fonts(self.root)
         global FONT_TITLE, FONT_HEAD, FONT_MONO, FONT_STATS, FONT_LABEL, FONT_ALERT
-        FONT_TITLE = (mono_family, 18, "bold")
-        FONT_HEAD = (mono_family, 9, "bold")
-        FONT_MONO = (mono_family, 9)
-        FONT_STATS = (mono_family, 13, "bold")
-        FONT_LABEL = (mono_family, 8)
-        FONT_ALERT = (mono_family, 10, "bold")
+        FONT_TITLE = fonts["title"]
+        FONT_HEAD = fonts["head"]
+        FONT_MONO = fonts["mono"]
+        FONT_STATS = fonts["stats"]
+        FONT_LABEL = fonts["label"]
+        FONT_ALERT = fonts["alert"]
 
         # ── State ──────────────────────────────────────────────────────────
         self.sort_by      = tk.StringVar(value="cpu")
@@ -370,12 +344,7 @@ class CPUMonitorApp:
         if not self._running:
             return
         try:
-            cpu_pct   = psutil.cpu_percent(interval=None)
-            per_cores = psutil.cpu_percent(percpu=True)
-            mem       = psutil.virtual_memory()
-            swap      = psutil.swap_memory()
-            n_procs   = len(psutil.pids())
-            load      = os.getloadavg() if hasattr(os, "getloadavg") else (None, None, None)
+            cpu_pct, per_cores, mem, swap, n_procs, load = get_system_snapshot()
 
             # Update stat boxes
             self._stat_boxes["cpu_total"].config(text=f"{cpu_pct:.1f}%")
@@ -383,7 +352,7 @@ class CPUMonitorApp:
             if len(per_cores) > 4:
                 cores_str += " …"
             self._stat_boxes["per_core"].config(text=cores_str,
-                                                 font=("Courier New", 9, "bold"))
+                                                font=FONT_HEAD)
             self._stat_boxes["memory"].config(
                 text=f"{mem.percent:.1f}%  ({mem.used//1024//1024}MB)")
             self._stat_boxes["swap"].config(
@@ -447,19 +416,7 @@ class CPUMonitorApp:
         try:
             filter_val = self.filter_text.get().lower()
             sort_key   = self.sort_by.get()
-
-            procs = []
-            for p in psutil.process_iter(
-                    ["pid", "name", "cpu_percent", "memory_percent",
-                     "memory_info", "status", "num_threads", "username"]):
-                try:
-                    info = p.info
-                    name = (info.get("name") or "")
-                    if filter_val and filter_val not in name.lower():
-                        continue
-                    procs.append(info)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    pass
+            procs = get_process_rows(filter_val)
 
             # Sort
             key_map = {
